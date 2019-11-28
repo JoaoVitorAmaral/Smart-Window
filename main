@@ -59,14 +59,14 @@ int sentido = 0;
 int semChuva = 0;
 int chovendo = 1;
 
-int modo = 0;
 #define autonomo 0
 #define dependente 1
+int modo = 0;
 
-int estadoJanela = 0;
 #define acionaPeloSC 0
 #define acionaPeloTMP 1
-#define acionapeloBot 2
+#define acionaPeloBOT 2
+uint8_t estadosModoAutonomo = 0;
 
 int motorUsado = 0;
 int motorA = 0;
@@ -74,7 +74,6 @@ int motorB = 1;
 
 //Dados
 int leituraSC = 0;
-int tempHigh = 0;
 
 void configuraGPIO();
 int leiturabotMode();
@@ -88,20 +87,15 @@ void acionamento(int motorProt, int acao);
 
 //TMP100 declarations
 I2C_HandleTypeDef hI2C;
-int TMP100_SAwrite = 0x92;
-int TMP100_SAread = 0x93;
-uint16_t TMP100_TR = 0X00;
-uint16_t TMP100_CR = 0X01;
-uint16_t TMP_resolution12bits = 0x60;
-uint8_t temperatureData[2] = {0, 0};
+uint16_t TMP100_resolution12bits = 0x60;
 float temperatureRead = 0;
-float temperatureThresholdHigh = 27; //oC
+#define temperatureThresholdHigh 27 //oC
 
 //TMP100 functions
 void setupLEDs();
 void I2Csetup();
-void TMP100_configuration(I2C_HandleTypeDef i2c_instance, uint16_t slaveAddress, uint16_t pointerRegister, uint16_t TMP_resolution);
-float TMP100_readTemperature(I2C_HandleTypeDef i2c_instance, uint16_t slaveAddress, uint16_t pointerRegister, uint16_t sizeOfBytes, uint8_t temperatureBytes, uint16_t nOfBytes);
+void TMP100_configuration(I2C_HandleTypeDef* i2c_instance, uint8_t TMP_resolution);
+float TMP100_readTemperature(I2C_HandleTypeDef* i2c_instance);
 
 int main(void)
 {
@@ -111,14 +105,7 @@ int main(void)
 	__GPIOD_CLK_ENABLE();
 	__GPIOE_CLK_ENABLE();
 	
-	//Configura GPIO do pinos: LEDs
-	GPIO_InitTypeDef botLED;
-
-	botLED.Pin = GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
-	botLED.Mode = GPIO_MODE_OUTPUT_PP;
-	botLED.Speed = GPIO_SPEED_FREQ_HIGH;
-	botLED.Pull = GPIO_NOPULL;
-	HAL_GPIO_Init(GPIOD, &botLED);
+	setupLEDs();
 	
 	//Configura GPIO dos pinos: botMode, botAcionamento, FDCa e FDCf
 	GPIO_InitTypeDef botGPIO;
@@ -147,113 +134,73 @@ int main(void)
 	ponteH.Speed = GPIO_SPEED_FREQ_HIGH;
 	ponteH.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(in_GPIO, &ponteH);
+
+	I2Csetup();
+	
+	//Configura TMP100 com resolução de 12bits
+	TMP100_configuration(&hI2C, TMP100_resolution12bits);
 	
 	for (;;)
 	{
 		//Interpreta o estado da janela
 		statusJanela = interpretaJanela();
-		
-		//Realiza a leitura do sensor de chuva
-		leituraSC = !lerSC();
-		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, leituraSC);
-		
-		if (leituraSC == chovendo)
-		{
-			if (estadoMotor == parado)
-			{
-				if (statusJanela != fechada || estadoMotor == girando)
-				{
-					HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);
-					
-					//Aciona motor para fechar janela 
-					HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_SET);
-					HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_RESET);
-				}
 				
-				if (statusJanela == fechada)
-				{
-					HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
-						
-					//Parar motor
-					HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_SET);
-					HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_SET);
-				}
-			}
-		}
-		
-		//Estado "botAcionamento" da janela
-		
-		//Detecção de borda de descida
-		botAnt = botAtu;
-		botAtu = HAL_GPIO_ReadPin(botAcionamento_GPIO, botAcionamento_Pin);
-	
-		if ((botAnt == 1 && botAtu == 0))
+		switch (modo)
 		{
-			if (estadoMotor == parado)
+		case autonomo:
+			switch (estadosModoAutonomo)
 			{
-				if (statusJanela == aberta || statusJanela == entreaberta)
+			case acionaPeloSC:
+				//Realiza a leitura do sensor de chuva
+				leituraSC = !lerSC();
+								
+				if (leituraSC == chovendo)
 				{
-					acao = fechar;
-				}	
-				else if (statusJanela == fechada) 
-				{
-					acao = abrir;
-				}
-			}
-			borda = 1;
-		}
-		
-		if (borda == 1) {
-			HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_SET);
-			
-			//HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_RESET);
-			//HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_SET);
-			
-			if(statusJanela != aberta || estadoMotor == girando)
-			{	
-				if (leituraSC != chovendo)
-				{
-					acao = abrir;
-					estadoMotor = girando;
-				
-					//acionamento(motorA, acao);
-					HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_RESET);
-					HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_SET);
-		
-					if (statusJanela == aberta)
+					if (estadoMotor == parado)
 					{
-						acao = parar;
-						//acionamento(motorA, acao);
-						HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_SET);
-						HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_SET);
-						estadoMotor = parado;
-			
-						borda = 0;
-						HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
+						if (statusJanela != fechada || estadoMotor == girando)
+						{
+							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);
+					
+							//Aciona motor para fechar janela 
+							HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_SET);
+							HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_RESET);
+						}
+				
+						if (statusJanela == fechada)
+						{
+							HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
+						
+							//Parar motor
+							HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_SET);
+							HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_SET);
+						}
 					}
 				}
-			}
-			else if(statusJanela != fechada || estadoMotor == girando)	//Aberta
-			{
-				acao = fechar;
-				estadoMotor = girando;
+				estadosModoAutonomo = acionaPeloTMP;
 				
-				//acionamento(motorA, acao);
-				HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_SET);
-				HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_RESET);
-			
-				if (statusJanela == fechada)
+				break;
+			case acionaPeloTMP:
+				//Realiza a leitura do sensor de temperatura (TMP100) em 2 bytes
+				temperatureRead = TMP100_readTemperature(&hI2C);
+				
+				if (temperatureRead > temperatureThresholdHigh)
 				{
-					acao = parar;
-					//acionamento(motorA, acao);
-					HAL_GPIO_WritePin(in_GPIO, in3_Pin, GPIO_PIN_SET);
-					HAL_GPIO_WritePin(in_GPIO, in4_Pin, GPIO_PIN_SET);
-					estadoMotor = parado;
-					
-					borda = 0;
+					HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_SET);
+				}
+				else
+				{
 					HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
 				}
+					
+				estadosModoAutonomo = acionaPeloSC;
+				
+				break;
 			}
+			break;
+		case dependente:
+
+			break;
 		}
 	}
 }
@@ -294,16 +241,6 @@ void configuraGPIO() {
 	scGPIO.Speed = GPIO_SPEED_FREQ_HIGH;
 	scGPIO.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(SC_GPIO, &scGPIO);
-	
-	//Configura GPIO do pinos: LEDs
-	
-	GPIO_InitTypeDef botLED;
-
-	botLED.Pin = GPIO_PIN_12 | GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
-	botLED.Mode = GPIO_MODE_OUTPUT_PP;
-	botLED.Speed = GPIO_SPEED_FREQ_HIGH;
-	botLED.Pull = GPIO_NOPULL;
-	HAL_GPIO_Init(GPIOD, &botLED);
 }
 
 int deteccaoDeBorda(GPIO_TypeDef* porta, int pino, int botAntProt, int botAtuProt, int bordaProt) {
@@ -445,19 +382,23 @@ void I2Csetup()
 	HAL_I2C_Init(&hI2C);
 }
 
-void TMP100_configuration(I2C_HandleTypeDef i2c_instance, uint16_t slaveAddress, uint16_t pointerRegister, uint16_t TMP_resolution){
+void TMP100_configuration(I2C_HandleTypeDef* i2c_instance, uint8_t TMP_resolution) {
+	uint32_t TMP100_SA = 0x92;
+	uint16_t TMP100_CR = 0X01;
+	
 	//Configura a resolução do TMP100
-	HAL_I2C_Mem_Write(&i2c_instance, slaveAddress, pointerRegister, 1, &TMP_resolution, 1, HAL_MAX_DELAY);
+	HAL_I2C_Mem_Write(i2c_instance, TMP100_SA, TMP100_CR, 1, &TMP_resolution, 1, HAL_MAX_DELAY);
 }
 
-float TMP100_readTemperature(I2C_HandleTypeDef i2c_instance, uint16_t slaveAddress, uint16_t pointerRegister, uint16_t sizeOfBytes,  uint8_t temperatureBytes, uint16_t nOfBytes)
+float TMP100_readTemperature(I2C_HandleTypeDef* i2c_instance)
 {
-	float temperature = 0;
-	//Lê a temperatura e guarda em 2 bytes
-	HAL_I2C_Mem_Read(&i2c_instance, slaveAddress, pointerRegister, sizeOfBytes, temperatureBytes, nOfBytes, HAL_MAX_DELAY);
-		
-	//Formata os dados do buffer TR do TMP100
-	temperature = (float)temperatureData[0] + ((float)temperatureData[1]) / 256;
+	uint32_t TMP100_SA = 0x92;
+	uint16_t TMP100_TR = 0X00;
 	
-	return temperature;
+	uint8_t temperatureBytes[2] = {0, 0};
+	//Lê a temperatura e guarda em 2 bytes
+	HAL_I2C_Mem_Read(i2c_instance, TMP100_SA, TMP100_TR, 1, temperatureBytes, 2, HAL_MAX_DELAY);
+	
+	//Formata os dados do buffer TR do TMP100
+	return ((float)temperatureBytes[0] + ((float)temperatureBytes[1]) / 256);
 }
