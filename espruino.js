@@ -301,14 +301,14 @@ mqtt.on('connected', function() {
 mqtt.on('message', function(msg) {
   var mensagem = JSON.parse(msg.message);
   if(mensagem === 'abrir'){
-    console.log('ABRIR JANELA 1');
+    console.log('ABRIR JANELA');
     modo = dependente;
     operacao = acionamentoDependente;
     sentidoDefinido = horario;
     proximaAcao = abrir;
   }
   else if(mensagem === 'fechar'){
-    console.log('FECHAR JANELA 1');
+    console.log('FECHAR JANELA');
     modo = dependente;
     operacao = acionamentoDependente;
     sentidoDefinido = antiHorario;
@@ -426,7 +426,7 @@ setInterval(function(){
         case acionamentoDependente:
           switch(proximaAcao){
             case fechar:
-              console.log('FECHAR JANELA 2');
+              console.log('FECHAR JANELA');
               acionarMotorFlag = on;
               acionamento(acionarMotorFlag, sentidoDefinido);
               acaoAtual = fechar;
@@ -439,7 +439,7 @@ setInterval(function(){
               }
             break;
             case abrir:
-              console.log('ABRIR JANELA 2');
+              console.log('ABRIR JANELA');
               acionarMotorFlag = on;
               acionamento(acionarMotorFlag, sentidoDefinido);
               acaoAtual = abrir;
